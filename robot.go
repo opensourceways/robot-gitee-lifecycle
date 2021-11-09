@@ -10,14 +10,16 @@ import (
 	"github.com/opensourceways/community-robot-lib/giteeclient"
 	libplugin "github.com/opensourceways/community-robot-lib/giteeplugin"
 	"github.com/sirupsen/logrus"
+
 )
 
 const (
-	botName                 = "lifecycle"
-	closeIssueMessage       = `this issue is closed by: ***@%s***.`
-	reopenIssueMessage      = "this issue is opened by: ***@%s***."
-	closePullRequestMessage = `this pull request is closed by: ***@%s***.`
-	optionFailureMessage    = `***@%s*** you can't %s a %s unless you are the author of it or a collaborator.`
+	botName                   = "lifecycle"
+	closeIssueMessage         = `this issue is closed by: ***@%s***.`
+	reopenIssueMessage        = "this issue is opened by: ***@%s***."
+	closePullRequestMessage   = `this pull request is closed by: ***@%s***.`
+	issueOptionFailureMessage = `***@%s*** you can't %s an issue unless you are the author of it or a collaborator.`
+	prOptionFailureMessage    = `***@%s*** you can't %s a pull request unless you are the author of it or a collaborator.`
 )
 
 var (
@@ -59,19 +61,19 @@ func (bot *robot) RegisterEventHandler(p libplugin.HandlerRegitster) {
 
 func (bot *robot) handleNoteEvent(e *sdk.NoteEvent, cfg libconfig.PluginConfig, log *logrus.Entry) error {
 	ne := giteeclient.NewNoteEventWrapper(e)
-
 	if !ne.IsCreatingCommentEvent() {
 		log.Debug("Event is not a creation of a comment for PR or issue, skipping.")
 		return nil
 	}
+
 	config, err := bot.getConfig(cfg)
 	if err != nil {
 		return err
 	}
 
 	org, repo := ne.GetOrgRep()
-	if configFor := config.configFor(org, repo); configFor == nil {
-		log.Debug("don't care this event because can't get configuration by org and repo")
+	if config.configFor(org, repo) == nil {
+		log.Debug("ignore this event, because of no configuration for this repo.")
 		return nil
 	}
 
@@ -94,13 +96,13 @@ func (bot *robot) handlePullRequest(e giteeclient.PRNoteEvent, log *logrus.Entry
 	prInfo := e.GetPRInfo()
 	commenter := e.GetCommenter()
 
-	isCollaborator, err := bot.cli.IsCollaborator(prInfo.Org, prInfo.Repo, prInfo.Author)
+	v, err := bot.hasPermission(prInfo.Org, prInfo.Repo, commenter, prInfo.Author)
 	if err != nil {
 		return err
 	}
 
-	if prInfo.Author != commenter && !isCollaborator {
-		comment := fmt.Sprintf(optionFailureMessage, commenter, "close", "pull request")
+	if !v {
+		comment := fmt.Sprintf(prOptionFailureMessage, commenter, "close")
 		return bot.cli.CreatePRComment(prInfo.Org, prInfo.Repo, prInfo.Number, comment)
 	}
 
@@ -115,49 +117,55 @@ func (bot *robot) handleIssue(ne giteeclient.IssueNoteEvent, log *logrus.Entry) 
 	org, repo := ne.GetOrgRep()
 	commenter := ne.GetCommenter()
 	number := ne.GetIssueNumber()
-
-	validate := func() (bool, error) {
-		author := ne.GetIssueAuthor()
-		isColl, err := bot.cli.IsCollaborator(org, repo, author)
-		if err != nil {
-			return false, err
-		}
-		return author == commenter || isColl, nil
-	}
+	author := ne.GetIssueAuthor()
 
 	if ne.IsIssueClosed() && reopenRe.MatchString(ne.GetComment()) {
-		ok, err := validate()
-		if err != nil {
-			return err
-		}
-
-		if !ok {
-			return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(optionFailureMessage, commenter, "open", "issue"))
-		}
-
-		if err := bot.cli.ReopenIssue(org, repo, number); err != nil {
-			return err
-		}
-
-		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(reopenIssueMessage, commenter))
+		return bot.openIssue(org, repo, number, commenter, author)
 	}
 
 	if ne.IsIssueOpen() && closeRe.MatchString(ne.GetComment()) {
-		ok, err := validate()
-		if err != nil {
-			return err
-		}
-
-		if !ok {
-			return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(optionFailureMessage, commenter, "close", "issue"))
-		}
-
-		if err := bot.cli.CloseIssue(org, repo, number); err != nil {
-			return err
-		}
-
-		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(closeIssueMessage, commenter))
+		return bot.closeIssue(org, repo, number, commenter, author)
 	}
 
 	return nil
+}
+
+func (bot *robot) openIssue(org, repo, number, commenter, author string) error {
+	v, err := bot.hasPermission(org, repo, commenter, author)
+	if err != nil {
+		return err
+	}
+	if !v {
+		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(issueOptionFailureMessage, commenter, "close"))
+	}
+
+	if err := bot.cli.ReopenIssue(org, repo, number); err != nil {
+		return err
+	}
+
+	return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(reopenIssueMessage, commenter))
+}
+
+func (bot *robot) closeIssue(org, repo, number, commenter, author string) error {
+	v, err := bot.hasPermission(org, repo, commenter, author)
+	if err != nil {
+		return err
+	}
+	if !v {
+		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(issueOptionFailureMessage, commenter, "close"))
+	}
+
+	if err := bot.cli.CloseIssue(org, repo, number); err != nil {
+		return err
+	}
+
+	return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(closeIssueMessage, commenter))
+}
+
+func (bot *robot) hasPermission(org, repo, commenter, author string) (bool, error) {
+	if commenter == author {
+		return true, nil
+	}
+
+	return bot.cli.IsCollaborator(org, repo, commenter)
 }
