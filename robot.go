@@ -136,7 +136,7 @@ func (bot *robot) openIssue(org, repo, number, commenter, author string) error {
 		return err
 	}
 	if !v {
-		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(issueOptionFailureMessage, commenter, "close"))
+		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(issueOptionFailureMessage, commenter, "open"))
 	}
 
 	if err := bot.cli.ReopenIssue(org, repo, number); err != nil {
