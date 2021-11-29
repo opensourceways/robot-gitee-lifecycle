@@ -10,14 +10,10 @@ import (
 	"github.com/opensourceways/community-robot-lib/giteeclient"
 	libplugin "github.com/opensourceways/community-robot-lib/giteeplugin"
 	"github.com/sirupsen/logrus"
-
 )
 
 const (
 	botName                   = "lifecycle"
-	closeIssueMessage         = `this issue is closed by: ***@%s***.`
-	reopenIssueMessage        = "this issue is opened by: ***@%s***."
-	closePullRequestMessage   = `this pull request is closed by: ***@%s***.`
 	issueOptionFailureMessage = `***@%s*** you can't %s an issue unless you are the author of it or a collaborator.`
 	prOptionFailureMessage    = `***@%s*** you can't %s a pull request unless you are the author of it or a collaborator.`
 )
@@ -106,11 +102,7 @@ func (bot *robot) handlePullRequest(e giteeclient.PRNoteEvent, log *logrus.Entry
 		return bot.cli.CreatePRComment(prInfo.Org, prInfo.Repo, prInfo.Number, comment)
 	}
 
-	if err := bot.cli.ClosePR(prInfo.Org, prInfo.Repo, prInfo.Number); err != nil {
-		return fmt.Errorf("Error closing PR: %v ", err)
-	}
-
-	return bot.cli.CreatePRComment(prInfo.Org, prInfo.Repo, prInfo.Number, fmt.Sprintf(closePullRequestMessage, commenter))
+	return bot.cli.ClosePR(prInfo.Org, prInfo.Repo, prInfo.Number)
 }
 
 func (bot *robot) handleIssue(ne giteeclient.IssueNoteEvent, log *logrus.Entry) error {
@@ -139,11 +131,7 @@ func (bot *robot) openIssue(org, repo, number, commenter, author string) error {
 		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(issueOptionFailureMessage, commenter, "reopen"))
 	}
 
-	if err := bot.cli.ReopenIssue(org, repo, number); err != nil {
-		return err
-	}
-
-	return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(reopenIssueMessage, commenter))
+	return bot.cli.ReopenIssue(org, repo, number)
 }
 
 func (bot *robot) closeIssue(org, repo, number, commenter, author string) error {
@@ -155,11 +143,7 @@ func (bot *robot) closeIssue(org, repo, number, commenter, author string) error 
 		return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(issueOptionFailureMessage, commenter, "close"))
 	}
 
-	if err := bot.cli.CloseIssue(org, repo, number); err != nil {
-		return err
-	}
-
-	return bot.cli.CreateIssueComment(org, repo, number, fmt.Sprintf(closeIssueMessage, commenter))
+	return bot.cli.CloseIssue(org, repo, number)
 }
 
 func (bot *robot) hasPermission(org, repo, commenter, author string) (bool, error) {
