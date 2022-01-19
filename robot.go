@@ -54,19 +54,19 @@ func (bot *robot) RegisterEventHandler(p framework.HandlerRegitster) {
 	p.RegisterNoteEventHandler(bot.handleNoteEvent)
 }
 
-func (bot *robot) handleNoteEvent(e *sdk.NoteEvent, cfg config.Config, log *logrus.Entry) error {
+func (bot *robot) handleNoteEvent(e *sdk.NoteEvent, c config.Config, log *logrus.Entry) error {
 	if !e.IsCreatingCommentEvent() {
 		log.Debug("Event is not a creation of a comment for PR or issue, skipping.")
 		return nil
 	}
 
-	config, err := bot.getConfig(cfg)
+	cfg, err := bot.getConfig(c)
 	if err != nil {
 		return err
 	}
 
 	org, repo := e.GetOrgRepo()
-	if config.configFor(org, repo) == nil {
+	if cfg.configFor(org, repo) == nil {
 		log.Debug("ignore this event, because of no configuration for this repo.")
 		return nil
 	}
