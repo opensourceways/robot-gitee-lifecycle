@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"regexp"
 
-	sdk "gitee.com/openeuler/go-gitee/gitee"
-	libconfig "github.com/opensourceways/community-robot-lib/config"
-	"github.com/opensourceways/community-robot-lib/giteeclient"
-	libplugin "github.com/opensourceways/community-robot-lib/giteeplugin"
+	"github.com/opensourceways/community-robot-lib/config"
+	framework "github.com/opensourceways/community-robot-lib/robot-gitee-framework"
+	sdk "github.com/opensourceways/go-gitee/gitee"
 	"github.com/sirupsen/logrus"
 )
 
@@ -40,24 +39,23 @@ type robot struct {
 	cli iClient
 }
 
-func (bot *robot) NewPluginConfig() libconfig.PluginConfig {
+func (bot *robot) NewConfig() config.Config {
 	return &configuration{}
 }
 
-func (bot *robot) getConfig(cfg libconfig.PluginConfig) (*configuration, error) {
+func (bot *robot) getConfig(cfg config.Config) (*configuration, error) {
 	if c, ok := cfg.(*configuration); ok {
 		return c, nil
 	}
 	return nil, errors.New("can't convert to configuration")
 }
 
-func (bot *robot) RegisterEventHandler(p libplugin.HandlerRegitster) {
+func (bot *robot) RegisterEventHandler(p framework.HandlerRegitster) {
 	p.RegisterNoteEventHandler(bot.handleNoteEvent)
 }
 
-func (bot *robot) handleNoteEvent(e *sdk.NoteEvent, cfg libconfig.PluginConfig, log *logrus.Entry) error {
-	ne := giteeclient.NewNoteEventWrapper(e)
-	if !ne.IsCreatingCommentEvent() {
+func (bot *robot) handleNoteEvent(e *sdk.NoteEvent, cfg config.Config, log *logrus.Entry) error {
+	if !e.IsCreatingCommentEvent() {
 		log.Debug("Event is not a creation of a comment for PR or issue, skipping.")
 		return nil
 	}
@@ -67,55 +65,58 @@ func (bot *robot) handleNoteEvent(e *sdk.NoteEvent, cfg libconfig.PluginConfig, 
 		return err
 	}
 
-	org, repo := ne.GetOrgRep()
+	org, repo := e.GetOrgRepo()
 	if config.configFor(org, repo) == nil {
 		log.Debug("ignore this event, because of no configuration for this repo.")
 		return nil
 	}
 
-	if ne.IsPullRequest() {
-		return bot.handlePullRequest(giteeclient.NewPRNoteEvent(e), log)
+	if e.IsPullRequest() {
+		return bot.handlePullRequest(e, log)
 	}
 
-	if ne.IsIssue() {
-		return bot.handleIssue(giteeclient.NewIssueNoteEvent(e), log)
+	if e.IsIssue() {
+		return bot.handleIssue(e, log)
 	}
 
 	return nil
 }
 
-func (bot *robot) handlePullRequest(e giteeclient.PRNoteEvent, log *logrus.Entry) error {
-	if !e.IsPROpen() || !closeRe.MatchString(e.GetComment()) {
+func (bot *robot) handlePullRequest(e *sdk.NoteEvent, log *logrus.Entry) error {
+	if !e.IsPROpen() || !closeRe.MatchString(e.GetComment().GetBody()) {
 		return nil
 	}
 
-	prInfo := e.GetPRInfo()
+	org, repo := e.GetOrgRepo()
 	commenter := e.GetCommenter()
+	author := e.GetPRAuthor()
 
-	v, err := bot.hasPermission(prInfo.Org, prInfo.Repo, commenter, prInfo.Author)
+	v, err := bot.hasPermission(org, repo, commenter, author)
 	if err != nil {
 		return err
 	}
 
+	number := e.GetPRNumber()
 	if !v {
 		comment := fmt.Sprintf(prOptionFailureMessage, commenter, "close")
-		return bot.cli.CreatePRComment(prInfo.Org, prInfo.Repo, prInfo.Number, comment)
+		return bot.cli.CreatePRComment(org, repo, number, comment)
 	}
 
-	return bot.cli.ClosePR(prInfo.Org, prInfo.Repo, prInfo.Number)
+	return bot.cli.ClosePR(org, repo, number)
 }
 
-func (bot *robot) handleIssue(ne giteeclient.IssueNoteEvent, log *logrus.Entry) error {
-	org, repo := ne.GetOrgRep()
-	commenter := ne.GetCommenter()
-	number := ne.GetIssueNumber()
-	author := ne.GetIssueAuthor()
+func (bot *robot) handleIssue(e *sdk.NoteEvent, log *logrus.Entry) error {
+	org, repo := e.GetOrgRepo()
+	commenter := e.GetCommenter()
+	number := e.GetIssueNumber()
+	author := e.GetIssueAuthor()
+	comment := e.GetComment().GetBody()
 
-	if ne.IsIssueClosed() && reopenRe.MatchString(ne.GetComment()) {
+	if e.IsIssueClosed() && reopenRe.MatchString(comment) {
 		return bot.openIssue(org, repo, number, commenter, author)
 	}
 
-	if ne.IsIssueOpen() && closeRe.MatchString(ne.GetComment()) {
+	if e.IsIssueOpen() && closeRe.MatchString(comment) {
 		return bot.closeIssue(org, repo, number, commenter, author)
 	}
 
