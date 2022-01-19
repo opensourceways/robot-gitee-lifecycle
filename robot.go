@@ -89,9 +89,8 @@ func (bot *robot) handlePullRequest(e *sdk.NoteEvent, log *logrus.Entry) error {
 
 	org, repo := e.GetOrgRepo()
 	commenter := e.GetCommenter()
-	author := e.GetPRAuthor()
 
-	v, err := bot.hasPermission(org, repo, commenter, author)
+	v, err := bot.hasPermission(org, repo, commenter, e.GetPRAuthor())
 	if err != nil {
 		return err
 	}
